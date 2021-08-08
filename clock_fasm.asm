@@ -32,18 +32,17 @@ return_address_size = 8
 
 main:
 	save_base_pointer
-	sub rsp, 8
+	sub rsp, 16
 
 	;; RDX contains a pointer to the System Table when
 	;; our application is called.
 	mov [system_table], rdx
 
-	push number
 	add_shadow_space
-	call int_to_string
+	call get_time_string
 	remove_shadow_space
 
-	;;mov rax, 0x0000003100320033
+	;;mov rax, 0x0033003A00320031
 	;;push rax
 	;;push string
 	add_shadow_space
@@ -100,7 +99,6 @@ int_to_string:
 	add rax, return_address_size
 	add rax, shadow_space_size
 	mov rax, [rax]
-	mov rax, [rax]
 
 	mov r13, 0	;; the final result string
 
@@ -139,7 +137,82 @@ get_time_string:
 	;; function into RAX:
 	mov rax, [rcx + 24]
 
-	;; TODO: finish this procedure
+
+	sub rsp, 16	;; allocate space for EFI_TIME struct
+	mov rcx, rsp
+
+	add_shadow_space
+	call rax
+	remove_shadow_space
+
+	mov r13, [rsp + 4]	;; read the hours from the EFI_TIME struct
+	and r13, 0xFF	;; because we need all other bits to be 0 so that we only read 1 number
+
+	sub rsp, 8
+	push r13	;; Convert hour number to string
+	add_shadow_space
+	call int_to_string
+	remove_shadow_space
+	pop r13
+	add rsp, 8
+
+	mov r8, r13	;; Some trickery to pad 0 for a single digit hour time
+	mov r9, 0xFFFF0000
+	and r8, r9
+	jnz continue_1
+	sal r13, 16
+	mov r9, 0x0030
+	add r13, r9
+
+continue_1:
+	mov r9, 0x3A00000000	;; add a ':' character
+	or r13, r9
+
+	mov r14, [rsp + 5]	;; read the minutes from the EFI_TIME struct
+	and r14, 0xFF	;; because we need all other bits to be 0 so that we only read 1 number
+
+	sub rsp, 16
+	push r13	;; save important value of r13 [because the called procedure could mess with it]
+	push r14	;; Convert hour number to string
+	add_shadow_space
+	call int_to_string
+	remove_shadow_space
+	pop r14
+	pop r13	;; restore r13
+	add rsp, 16
+
+	mov r8, r14	;; Some trickery to pad 0 for a single digit hour time
+	mov r9, 0xFFFF0000
+	and r8, r9
+	jnz continue_2
+	sal r14, 16
+	mov r9, 0x0030
+	add r14, r9
+
+continue_2:
+	mov r15, r14	;; make a copy of minutes string
+	and r15, 0xFFFF ;; extract most significant number char from hour string
+	shl r15, 48
+	or r13, r15	;; attach most significant minutes character to 'hh:' string.
+			;; Remember everything is in reverse because of little endianness.
+
+	mov rax, rbp	;; store it back on caller's stack
+	add rax, 8
+	add rax, return_address_size
+	add rax, shadow_space_size
+	mov [rax], r13
+
+	mov r12, r14
+	mov r9, 0xFFFF0000
+	and r12, r9
+	shr r12, 16
+
+	mov rax, rbp	;; store it back on caller's stack
+	add rax, 16
+	add rax, return_address_size
+	add rax, shadow_space_size
+	mov [rax], r12
+
 	restore_base_pointer
 	ret
 
